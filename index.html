@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <title>دكتيلو – حرف بحرف</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root{--accent:#00f5ff;--bg:#000;--card:#111;}
+    *{box-sizing:border-box;margin:0;padding:0;font-family:'Cairo',sans-serif}
+    body{background:var(--bg);color:#fff;display:flex;flex-direction:column;align-items:center;padding:2rem}
+    h1{margin-bottom:1.2rem;font-size:2rem;letter-spacing:1px}
+    .card{background:var(--card);border-radius:12px;padding:1.5rem;width:100%;max-width:480px;margin-bottom:1.5rem}
+    label{display:block;margin-bottom:.5rem;font-weight:600}
+    textarea{width:100%;min-height:90px;padding:.7rem;border-radius:8px;border:none;resize:vertical;font-size:1.2rem}
+    .btn{background:var(--accent);color:#000;border:none;padding:.8rem 1.4rem;border-radius:8px;font-weight:700;cursor:pointer;width:100%;font-size:1.1rem;margin-top:1rem;transition:.3s}
+    .btn:hover{filter:brightness(1.15)}
+    .btn:disabled{background:#555;color:#222;cursor:not-allowed}
+    #result video{width:100%;border-radius:10px;margin-top:1rem;background:#000}
+    .hidden{display:none}
+    #log{color:#f00;margin-top:.5rem;font-size:.9rem}
+  </style>
+</head>
+<body>
+  <h1>دكتيلو – حرف بحرف</h1>
+
+  <div class="card">
+    <label>✍️ اكتب النص (عربي أو إنجليزي)</label>
+    <textarea id="textInput" placeholder="اكتب النص هنا..."></textarea>
+  </div>
+
+  <button id="genBtn" class="btn">إنشاء الفيديو</button>
+  <div id="log"></div>
+
+  <div id="result" class="card hidden">
+    <video id="outVideo" controls></video>
+    <div style="display:flex;gap:.5rem;margin-top:1rem">
+      <button id="downBtn" class="btn">تحميل الفيديو</button>
+      <button id="tiktokBtn" class="btn">فتح تيك توك</button>
+    </div>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/recordrtc@5.6.2/RecordRTC.js"></script>
+<script>
+const log=m=>document.getElementById('log').textContent=m;
+
+/* ====== صوت الدكتيلو ====== */
+let audioCtx;
+function initAudio(){
+  if(!audioCtx)audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+}
+function keyClick(){
+  initAudio();
+  const o=audioCtx.createOscillator();
+  const g=audioCtx.createGain();
+  o.connect(g);g.connect(audioCtx.destination);
+  o.frequency.value=800+Math.random()*400;
+  o.type='square';
+  g.gain.setValueAtTime(0.0001,audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.2,audioCtx.currentTime+0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+0.04);
+  o.start();o.stop(audioCtx.currentTime+0.04);
+}
+
+/* ====== التوليد مع إيقاف صريح ====== */
+let recorder;
+let rafId; // معرف requestAnimationFrame
+
+async function generateVideo(){
+  const txt=document.getElementById('textInput').value.trim();
+  if(!txt)throw new Error('يرجى كتابة نص');
+  const canvas=document.createElement('canvas');
+  canvas.width=1080;canvas.height=1920;
+  const ctx=canvas.getContext('2d');
+  const stream=canvas.captureStream(30);
+
+  // نبدأ AudioContext ونستورد RecordRTC
+  await import('https://cdn.jsdelivr.net/npm/recordrtc@5.6.2/RecordRTC.js');
+  recorder=new RecordRTC(stream,{type:'video',mimeType:'video/webm',videoBitsPerSecond:2500000});
+  recorder.startRecording();
+
+  const totalFrames=txt.length*6; // 6 إطارات لكل حرف
+  const btn=document.getElementById('genBtn');
+  btn.disabled=true;btn.textContent='جارِ الكتابة...';
+
+  const start=performance.now();
+  function draw(){
+    const now=performance.now();
+    const currentFrame=Math.floor((now-start)/33.33); // 30 fps
+    const idx=Math.min(Math.floor(currentFrame/6),txt.length);
+
+    // خلفية سوداء مباشرة (بدون var)
+    ctx.fillStyle='#000';ctx.fillRect(0,0,canvas.width,canvas.height);
+    // خط أزرق مباشرة (بدون var)
+    ctx.fillStyle='#00f5ff';
+    ctx.font='bold 100px Cairo';ctx.textAlign='center';ctx.baseLine='middle';
+    const visible=txt.slice(0,idx);
+    ctx.fillText(visible,canvas.width/2,canvas.height/2);
+    // صوت عند كل حرف جديد
+    if(idx>Math.floor((currentFrame-1)/6))keyClick();
+
+    // عند الانتهاء نوقف التسجيل ونوقف الحلقة
+    if(currentFrame>=totalFrames){
+      cancelAnimationFrame(rafId);
+      recorder.stopRecording(()=>{
+        const blob=recorder.getBlob();
+        const v=document.getElementById('outVideo');
+        v.src=URL.createObjectURL(blob);
+        document.getElementById('result').classList.remove('hidden');
+        btn.disabled=false;btn.textContent='إنشاء الفيديو';
+      });
+      return;
+    }
+    rafId=requestAnimationFrame(draw);
+  }
+  draw();
+}
+
+/* ====== أزرار التحميل والمشاركة ====== */
+document.getElementById('genBtn').addEventListener('click',()=>{
+  log('');
+  generateVideo().catch(err=>log('خطأ: '+err.message));
+});
+
+document.getElementById('downBtn').addEventListener('click',()=>{
+  const v=document.getElementById('outVideo');
+  const a=document.createElement('a');
+  a.href=v.src;
+  a.download='Dactylo_1080x1920.webm';
+  a.click();
+});
+
+document.getElementById('tiktokBtn').addEventListener('click',()=>{
+  window.open('https://www.tiktok.com/upload','_blank');
+});
+</script>
+</body>
+</html>
