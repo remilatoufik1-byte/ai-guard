@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <title>AI-Guard Studio – اصنع فيديوك في ثوانٍ</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root{--accent:#ff0051;--bg:#000;--card:#111;}
+    *{box-sizing:border-box;margin:0;padding:0;font-family:'Cairo',sans-serif}
+    body{background:var(--bg);color:#fff;display:flex;flex-direction:column;align-items:center;padding:2rem}
+    h1{margin-bottom:1.2rem;font-size:2rem;letter-spacing:1px}
+    .card{background:var(--card);border-radius:12px;padding:1.5rem;width:100%;max-width:480px;margin-bottom:1.5rem}
+    label{display:block;margin-bottom:.5rem;font-weight:600}
+    textarea,select{width:100%;padding:.7rem;border-radius:8px;border:none;font-size:1.1rem}
+    textarea{resize:vertical;min-height:90px}
+    .btn{background:var(--accent);color:#fff;border:none;padding:.8rem 1.4rem;border-radius:8px;font-weight:700;cursor:pointer;width:100%;font-size:1.1rem;margin-top:1rem;transition:.3s}
+    .btn:hover{filter:brightness(1.15)}
+    .btn:disabled{background:#555;color:#222;cursor:not-allowed}
+    #result video{width:100%;border-radius:10px;margin-top:1rem;background:#000}
+    .hidden{display:none}
+    #log{color:#f00;margin-top:.5rem;font-size:.9rem}
+  </style>
+</head>
+<body>
+  <h1>AI-Guard Studio</h1>
+
+  <div class="card">
+    <label>✍️ النص (عربي أو إنجليزي)</label>
+    <textarea id="textInput" placeholder="اكتب نصك هنا..."></textarea>
+  </div>
+
+  <div class="card">
+    <label>🎬 اختر القالب</label>
+    <select id="template">
+      <option value="dactyl">دكتيلو – حرف بحرف</option>
+      <option value="delete">حذف وإعادة – كل ثانية</option>
+      <option value="aiGuard">حامي AI – يدخل ويحمي</option>
+    </select>
+  </div>
+
+  <div class="card">
+    <label>🎵 موسيقى خلفية (اختياري)</label>
+    <input type="file" id="bgMusic" accept="audio/*">
+  </div>
+
+  <button id="genBtn" class="btn">إنشاء الفيديو</button>
+  <div id="log"></div>
+
+  <div id="result" class="card hidden">
+    <video id="outVideo" controls></video>
+    <div style="display:flex;gap:.5rem;margin-top:1rem">
+      <button id="downBtn" class="btn">تحميل الفيديو</button>
+      <button id="tiktokBtn" class="btn">نشر على تيك توك</button>
+    </div>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/recordrtc@5.6.2/RecordRTC.js"></script>
+<script>
+const log=m=>document.getElementById('log').textContent=m;
+
+/* ====== كسر النص إلى أسطر متناسقة ====== */
+function wrapText(ctx,text,maxW){
+  const words=text.split(' ');
+  const lines=[];
+  let current='';
+  for(const w of words){
+    const test=current?current+' '+w:w;
+    const met=ctx.measureText(test);
+    if(met.width>maxW && current){
+      lines.push(current);
+      current=w;
+    }else{
+      current=test;
+    }
+  }
+  if(current)lines.push(current);
+  return lines;
+}
+
+/* ====== اختيار القالب ====== */
+const templates={
+  dactyl:(ctx,txt,frame)=>{
+    const idx=Math.min(Math.floor(frame/6),txt.length);
+    ctx.fillStyle='#000';ctx.fillRect(0,0,ctx.canvas.width,ctx.canvas.height);
+    ctx.fillStyle='#ff0051';
+    ctx.font='bold 90px Cairo';ctx.textAlign='center';
+    ctx.fillText(txt.slice(0,idx),ctx.canvas.width/2,ctx.canvas.height/2);
+  },
+  delete:(ctx,txt,frame,total)=>{
+    const words=txt.split(' ');
+    const del=Math.min(Math.floor(frame/30),words.length);
+    const visible=words.slice(0,words.length-del).join(' ');
+    const lines=wrapText(ctx,visible,ctx.canvas.width-100);
+    const lineH=110;
+    const startY=ctx.canvas.height/2-(lines.length*lineH)/2+lineH/2;
+    ctx.fillStyle='#000';ctx.fillRect(0,0,ctx.canvas.width,ctx.canvas.height);
+    ctx.fillStyle='#ff0051';ctx.font='bold 90px Cairo';ctx.textAlign='center';
+    lines.forEach((line,i)=>ctx.fillText(line,ctx.canvas.width/2,startY+i*lineH));
+  },
+  aiGuard:(ctx,txt,frame,total)=>{
+    // قالب حماية AI (نضيفه لاحقاً)
+    ctx.fillStyle='#000';ctx.fillRect(0,0,ctx.canvas.width,ctx.canvas.height);
+    ctx.fillStyle='#00f5ff';
+    ctx.font='bold 90px Cairo';ctx.textAlign='center';
+    ctx.fillText(txt,ctx.canvas.width/2,ctx.canvas.height/2);
+  }
+};
+
+/* ====== التوليد ====== */
+let recorder,rafId;
+
+async function generateVideo(){
+  const txt=document.getElementById('textInput').value.trim();
+  const template=document.getElementById('template').value;
+  if(!txt)throw new Error('يرجى كتابة نص');
+  const canvas=document.createElement('canvas');
+  canvas.width=1080;canvas.height=1920;
+  const ctx=canvas.getContext('2d');
+  const stream=canvas.captureStream(30);
+
+  await import('https://cdn.jsdelivr.net/npm/recordrtc@5.6.2/RecordRTC.js');
+  recorder=new RecordRTC(stream,{type:'video',mimeType:'video/webm',videoBitsPerSecond:2500000});
+  recorder.startRecording();
+
+  const words=txt.split(' ');
+  const btn=document.getElementById('genBtn');
+  btn.disabled=true;btn.textContent='جارِ التصوير...';
+
+  const totalFrames=words.length*30; // 30 إطار لكل كلمة
+  const start=performance.now();
+  function draw(){
+    const now=performance.now();
+    const currentFrame=Math.floor((now-start)/33.33); // 30 fps
+    if(currentFrame>totalFrames){
+      cancelAnimationFrame(rafId);
+      recorder.stopRecording(()=>{
+        const blob=recorder.getBlob();
+        const v=document.getElementById('outVideo');
+        v.src=URL.createObjectURL(blob);
+        document.getElementById('result').classList.remove('hidden');
+        btn.disabled=false;btn.textContent='إنشاء الفيديو';
+      });
+      return;
+    }
+    templates[template](ctx,txt,currentFrame,totalFrames);
+    rafId=requestAnimationFrame(draw);
+  }
+  draw();
+}
+
+/* ====== أزرار التحميل والمشاركة ====== */
+document.getElementById('genBtn').addEventListener('click',()=>{
+  log('');
+  generateVideo().catch(err=>log('خطأ: '+err.message));
+});
+
+document.getElementById('downBtn').addEventListener('click',()=>{
+  const v=document.getElementById('outVideo');
+  const a=document.createElement('a');
+  a.href=v.src;
+  a.download='AI-Guard_1080x1920.webm';
+  a.click();
+});
+
+document.getElementById('tiktokBtn').addEventListener('click',()=>{
+  window.open('https://www.tiktok.com/upload','_blank');
+});
+</script>
+</body>
+</html>
+  
