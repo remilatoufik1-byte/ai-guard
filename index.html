@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <title>كتابة + فهد أسود</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root{--accent:#ff0051;--bg:#000;--card:#111;}
+    *{box-sizing:border-box;margin:0;padding:0;font-family:'Cairo',sans-serif}
+    body{background:var(--bg);color:#fff;display:flex;flex-direction:column;align-items:center;padding:2rem;min-height:100vh}
+    h1{margin-bottom:1.2rem;font-size:2rem;letter-spacing:1px}
+    .card{background:var(--card);border-radius:12px;padding:1.5rem;width:100%;max-width:480px;margin-bottom:1.5rem}
+    label{display:block;margin-bottom:.5rem;font-weight:600}
+    textarea{width:100%;min-height:90px;padding:.7rem;border-radius:8px;border:none;resize:vertical;font-size:1.2rem}
+    .btn{background:var(--accent);color:#fff;border:none;padding:.8rem 1.4rem;border-radius:8px;font-weight:700;cursor:pointer;width:100%;font-size:1.1rem;margin-top:1rem;transition:.3s}
+    .btn:hover{filter:brightness(1.15)}
+    .btn:disabled{background:#555;color:#222;cursor:not-allowed}
+    #result video{width:100%;border-radius:10px;margin-top:1rem;background:#000}
+    .hidden{display:none}
+    #log{color:#f00;margin-top:.5rem;font-size:.9rem}
+  </style>
+</head>
+<body>
+  <h1>كتابة تدفقية + فهد أسود</h1>
+
+  <div class="card">
+    <label>✍️ اكتب نصك (عربي/إنجليزي)</label>
+    <textarea id="textInput" placeholder="اكتب نصك الطويل..."></textarea>
+  </div>
+
+  <button id="genBtn" class="btn">إنشاء الفيديو</button>
+  <div id="log"></div>
+
+  <div id="result" class="card hidden">
+    <video id="outVideo" controls></video>
+    <div style="display:flex;gap:.5rem;margin-top:1rem">
+      <button id="downBtn" class="btn">تحميل الفيديو</button>
+      <button id="tiktokBtn" class="btn">فتح تيك توك</button>
+    </div>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/recordrtc@5.6.2/RecordRTC.js"></script>
+<script>
+const log=m=>document.getElementById('log').textContent=m;
+
+/* ====== فهد أسود SVG ====== */
+const pantherSVG=`
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="100" cy="100" r="80" fill="#000"/>
+  <circle cx="75" cy="80" r="12" fill="#ffd700"/>
+  <circle cx="125" cy="80" r="12" fill="#ffd700"/>
+  <path d="M60 130 Q100 150 140 130" stroke="#ffd700" stroke-width="4" fill="none"/>
+</svg>`;
+
+/* ====== كتابة تدفقية: كلمة كاملة ثم انتقال السطر + فهد أسود في النهاية ====== */
+let recorder,rafId;
+
+async function generateVideo(){
+  const txt=document.getElementById('textInput').value.trim();
+  if(!txt)throw new Error('يرجى كتابة نص');
+  const canvas=document.createElement('canvas');
+  canvas.width=1080;canvas.height=1920;
+  const ctx=canvas.getContext('2d');
+  const stream=canvas.captureStream(30);
+
+  await import('https://cdn.jsdelivr.net/npm/recordrtc@5.6.2/RecordRTC.js');
+  recorder=new RecordRTC(stream,{type:'video',mimeType:'video/webm',videoBitsPerSecond:2500000});
+  recorder.startRecording();
+
+  const btn=document.getElementById('genBtn');
+  btn.disabled=true;btn.textContent='جارِ التصوير...';
+
+  // إعدادات الخط والمساحة
+  const fontSize=90;
+  const lineH=fontSize+20;
+  const margin=60;
+  const maxW=canvas.width-margin*2;
+  const maxLines=Math.floor((canvas.height-margin*2)/lineH);
+
+  ctx.font=`bold ${fontSize}px Cairo`;
+  ctx.textAlign='right'; // للعربية
+  ctx.fillStyle='#ff0051';
+
+  const words=txt.split(' ');
+  let index=0;
+  let lines=[''];
+  let currentLine='';
+  let pantherShown=false;
+  let pantherStart=0;
+
+  const totalFrames=words.length*12; // 12 إطار لكلمة (≈ 4 حروف/ثانية)
+  const start=performance.now();
+
+  function draw(){
+    const now=performance.now();
+    const currentFrame=Math.floor((now-start)/33.33); // 30 fps
+
+    // إضافة كلمات كاملة فقط
+    if(index<words.length && currentFrame>index*12){
+      const word=words[index++];
+      const test=currentLine+(currentLine?' ':'')+word;
+      const met=ctx.measureText(test);
+      if(met.width>maxW && currentLine){
+        // انتقال للسطر الجديد
+        lines.push(word);
+        currentLine=word;
+        // إذا تجاوزنا العدد نمحو الأول ونبقي الجديد
+        if(lines.length>maxLines){
+          lines.shift();
+        }
+      }else{
+        currentLine=test;
+        lines[lines.length-1]=currentLine;
+      }
+    }
+
+    // خلفية سوداء
+    ctx.fillStyle='#000';ctx.fillRect(0,0,canvas.width,canvas.height);
+    // الخط الوردي
+    ctx.fillStyle='#ff0051';
+    const startY=margin+lineH;
+    lines.forEach((line,i)=>ctx.fillText(line,canvas.width-margin,startY+i*lineH));
+
+    // فهد أسود بعد آخر حرف + 1 ثانية
+    if(index>=words.length && !pantherShown && currentFrame>totalFrames+30){
+      pantherShown=true;
+      pantherStart=currentFrame;
+    }
+    if(pantherShown && currentFrame<=pantherStart+30){ // 1 ثانية = 30 إطار
+      const alpha=1-(currentFrame-pantherStart)/30; // يختفي تدريجياً
+      ctx.globalAlpha=alpha;
+      const img=new Image();
+      img.src='data:image/svg+xml;base64,'+btoa(pantherSVG);
+      ctx.drawImage(img,canvas.width/2-100,canvas.height/2-100,200,200);
+      ctx.globalAlpha=1;
+    }
+
+    // نهاية الفيديو بعد آخر حرف + فهد + 2 ثانية
+    if(pantherShown && currentFrame>pantherStart+30+60){ // 2 ثانية إضافية
+      cancelAnimationFrame(rafId);
+      recorder.stopRecording(()=>{
+        const blob=recorder.getBlob();
+        const v=document.getElementById('outVideo');
+        v.src=URL.createObjectURL(blob);
+        document.getElementById('result').classList.remove('hidden');
+        btn.disabled=false;btn.textContent='إنشاء الفيديو';
+      });
+      return;
+    }
+    rafId=requestAnimationFrame(draw);
+  }
+  draw();
+}
+
+/* ====== أزرار التحميل والمشاركة ====== */
+document.getElementById('genBtn').addEventListener('click',()=>{
+  log('');
+  generateVideo().catch(err=>log('خطأ: '+err.message));
+});
+
+document.getElementById('downBtn').addEventListener('click',()=>{
+  const v=document.getElementById('outVideo');
+  const a=document.createElement('a');
+  a.href=v.src;
+  a.download='PantherText_1080x1920.webm';
+  a.click();
+});
+
+document.getElementById('tiktokBtn').addEventListener('click',()=>{
+  window.open('https://www.tiktok.com/upload','_blank');
+});
+</script>
+</body>
+</html>
